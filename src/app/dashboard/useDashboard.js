@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { wallet } from "@/lib/wallet";
 import { txCoordinator } from "@/lib/blockchain";
 import { useTxFlow } from "@/lib/useTxFlow";
 import { useChainData } from "@/lib/useChainData";
+import { useChain } from "@/lib/chainContext";
 import { toast } from "@/lib/toast";
 
 export function useDashboard() {
   const router = useRouter();
+  const { activeChainKey, activeChain } = useChain();
   const [walletAddress, setWalletAddress] = useState(null);
   const [bootError, setBootError] = useState(null);
 
@@ -23,7 +25,6 @@ export function useDashboard() {
     }
     setWalletAddress(stored);
 
-    // Listen for account changes — if user switches accounts, redirect to landing
     const unsub = wallet.onAccountChange((addr) => {
       if (!addr) {
         localStorage.removeItem("wallet_address");
@@ -32,21 +33,36 @@ export function useDashboard() {
       }
       if (addr.toLowerCase() !== stored.toLowerCase()) {
         localStorage.setItem("wallet_address", addr);
-        window.location.reload(); // Different account = different identity
+        window.location.reload();
       }
     });
     return () => unsub && unsub();
   }, [router]);
 
-  // ----- Dashboard data (chain-backed, polls every 20s for live state) -----
+  // ----- Dashboard data -----
+  // We fetch the dashboard; if the user has no identity on this chain, the
+  // BE returns 404. We treat that as a soft "no identity" state instead of
+  // an error so the UI can show the "create identity on this chain" CTA.
+  const dashboardFetch = useCallback(async () => {
+    try {
+      return await api.getUserDashboard(walletAddress);
+    } catch (e) {
+      const msg = String(e?.message || "");
+      if (msg.includes("No identity on") || msg.includes("404")) {
+        return { has_identity: false, chain: activeChainKey, wallet_address: walletAddress };
+      }
+      throw e;
+    }
+  }, [walletAddress, activeChainKey]);
+
   const {
     data: user,
     loading,
     error,
     refetch,
   } = useChainData(
-    () => api.getUserDashboard(walletAddress),
-    [walletAddress],
+    dashboardFetch,
+    [walletAddress, activeChainKey], // ← refetch on chain switch too
     { enabled: Boolean(walletAddress), pollMs: 100_000 }
   );
 
@@ -58,7 +74,7 @@ export function useDashboard() {
   const [targetAddress, setTargetAddress] = useState("");
   const [selectedLoan, setSelectedLoan] = useState(null);
 
-  // ----- Paginated history -----
+  // ----- Paginated history (chain-aware) -----
   const [fullLoans, setFullLoans] = useState({ items: [], total_pages: 1, current_page: 1 });
   const [fullAttestations, setFullAttestations] = useState({ items: [], total_pages: 1, current_page: 1 });
   const [loanPage, setLoanPage] = useState(1);
@@ -70,16 +86,15 @@ export function useDashboard() {
         .then(setFullLoans)
         .catch((e) => console.error(e));
     }
-  }, [activeTab, historyView, loanPage, walletAddress]);
+  }, [activeTab, historyView, loanPage, walletAddress, activeChainKey]);
 
   useEffect(() => {
     if (activeTab === "history" && historyView === "attestations" && walletAddress) {
-      // Default to "given" attestations; the UI can flip role later
       api.getAttestationHistory(walletAddress, attestPage, 5, "given")
         .then(setFullAttestations)
         .catch((e) => console.error(e));
     }
-  }, [activeTab, historyView, attestPage, walletAddress]);
+  }, [activeTab, historyView, attestPage, walletAddress, activeChainKey]);
 
   const goToHistory = (view) => {
     setHistoryView(view);
@@ -100,9 +115,13 @@ export function useDashboard() {
 
   const handleBorrow = async () => {
     if (!user || !amount) return;
+    if (!user.has_identity) {
+      toast.error("No identity on this chain", `Create a CreditGraph identity on ${activeChain.name} first.`);
+      return;
+    }
     const amt = parseFloat(amount);
     if (amt <= 0 || amt > user.headroom_usdc) {
-      toast.error("Invalid amount", `Headroom is $${user.headroom_usdc.toFixed(2)}`);
+      toast.error("Invalid amount", `Headroom is $${(user.headroom_usdc || 0).toFixed(2)}`);
       return;
     }
     setActiveModal(null);
@@ -111,12 +130,10 @@ export function useDashboard() {
       title: `Borrow $${amt}`,
       needsApproval: false,
       steps: [
-        { stage: "signing", fn: () => Promise.resolve() }, // visual cue before MetaMask
+        { stage: "signing", fn: () => Promise.resolve() },
         {
           stage: "confirming",
-          fn: async () => {
-            return await txCoordinator.borrow(walletAddress, user.token_id, amt, 30);
-          },
+          fn: async () => await txCoordinator.borrow(walletAddress, user.token_id, amt, 30),
         },
         { stage: "indexing", fn: () => new Promise((r) => setTimeout(r, 800)) },
       ],
@@ -133,10 +150,7 @@ export function useDashboard() {
       title: `Repay $${amt}`,
       needsApproval: true,
       steps: [
-        {
-          stage: "approving",
-          fn: () => Promise.resolve(), // Approval happens inside repay() if needed
-        },
+        { stage: "approving", fn: () => Promise.resolve() },
         {
           stage: "confirming",
           fn: async () => await txCoordinator.repay(walletAddress, selectedLoan, amt),
@@ -153,10 +167,9 @@ export function useDashboard() {
     setActiveModal(null);
 
     try {
-      // Resolve subject_token_id from target wallet
       const subj = await api.getIdentity(targetAddress);
       if (!subj.has_identity) {
-        toast.error("No identity found", "That wallet hasn't onboarded yet.");
+        toast.error("No identity found", `That wallet hasn't onboarded on ${activeChain.name} yet.`);
         return;
       }
 
@@ -181,7 +194,7 @@ export function useDashboard() {
   const handleFaucet = async () => {
     if (!walletAddress) return;
     try {
-      toast.info("Requesting USDC", "Admin minting 100 test USDC to your wallet...");
+      toast.info("Requesting USDC", `Admin minting 100 test USDC on ${activeChain.name}...`);
       await txCoordinator.faucet(walletAddress, 100);
       toast.success("Received 100 USDC", "Test funds are in your wallet.");
       refetch();
@@ -193,7 +206,6 @@ export function useDashboard() {
   const handleFinalizeScore = async () => {
     if (!user || !user.pending_score) return;
     try {
-      // BE handles it server-side using admin signer (cheaper for user, no MetaMask popup)
       await api.finalizeScoreOnchain(user.token_id);
       toast.success("Score finalized", "Your new score is now live.");
       refetch();
@@ -210,6 +222,20 @@ export function useDashboard() {
       refetch();
     } catch (e) {
       toast.error("Refresh failed", e.message);
+    }
+  };
+
+  // ----- Create identity on the current chain -----
+  // Called from the "no identity on this chain" CTA (added in Part 4).
+  const handleCreateIdentityHere = async () => {
+    if (!walletAddress) return;
+    try {
+      toast.info(`Creating identity on ${activeChain.name}`, "Minting NFT and running agent quorum...");
+      const result = await api.onboardUser(walletAddress);
+      toast.success("Identity ready", `Token #${result.token_id} on ${activeChain.name}`);
+      refetch();
+    } catch (e) {
+      toast.error("Could not create identity", e.message);
     }
   };
 
@@ -249,6 +275,7 @@ export function useDashboard() {
     handleFaucet,
     handleFinalizeScore,
     handleRefreshScore,
+    handleCreateIdentityHere,
     disconnectWallet,
   };
 }

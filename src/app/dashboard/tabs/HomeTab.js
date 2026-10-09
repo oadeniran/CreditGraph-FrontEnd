@@ -1,19 +1,18 @@
 import { usdc, bpsToPct, shortAddress, formatCountdown } from "@/lib/format";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { useChain } from "@/lib/chainContext";
 
 export default function HomeTab({
   user, styles,
   setActiveModal, setAmount, setSelectedLoan, goToHistory,
   handleFaucet, handleFinalizeScore, handleRefreshScore,
+  handleCreateIdentityHere,
 }) {
-  const topLoans = user?.active_loans?.slice(0, 5) || [];
-  const topAttestations = user?.attestations_received?.slice(0, 5) || [];
-  const score = user?.credit_score?.score;
-  const tier = user?.credit_score?.tier;
-  const isStale = user?.credit_score?.is_stale;
+  const { activeChain } = useChain();
 
-  // Pending score countdown
+  // ⚠️ All hooks MUST come before any early return (Rules of Hooks).
+  // Pending-score countdown runs even when the no-identity CTA shows;
+  // in that case `user.pending_score` is absent and the effect is a no-op.
   const [pendingRemaining, setPendingRemaining] = useState(0);
   useEffect(() => {
     if (!user?.pending_score || user.pending_score.finalized) {
@@ -29,6 +28,22 @@ export default function HomeTab({
     return () => clearInterval(id);
   }, [user?.pending_score]);
 
+  // ----------------------------------------------------------------
+  // No identity on this chain → full-width onboarding CTA
+  // ----------------------------------------------------------------
+  if (user && user.has_identity === false) {
+    return <NoIdentityOnChain chain={activeChain} onCreate={handleCreateIdentityHere} />;
+  }
+
+  // ----------------------------------------------------------------
+  // Normal dashboard
+  // ----------------------------------------------------------------
+  const topLoans = user?.active_loans?.slice(0, 5) || [];
+  const topAttestations = user?.attestations_received?.slice(0, 5) || [];
+  const score = user?.credit_score?.score;
+  const tier = user?.credit_score?.tier;
+  const isStale = user?.credit_score?.is_stale;
+
   const showPendingCard = user?.pending_score && !user.pending_score.finalized;
   const canFinalize = showPendingCard && pendingRemaining === 0;
 
@@ -36,7 +51,9 @@ export default function HomeTab({
     <div>
       {/* Credit card hero */}
       <div className={`card ${styles.creditCard}`}>
-        <p className={styles.cardSubtitle}>Available credit</p>
+        <p className={styles.cardSubtitle}>
+          Available credit <span style={{ opacity: 0.6 }}>· {activeChain.name}</span>
+        </p>
         <div className={`big-number ${styles.cardValue}`}>
           {usdc(user?.headroom_usdc || 0)}
         </div>
@@ -186,6 +203,141 @@ export default function HomeTab({
         >
           Refresh score now
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Empty-state CTA when the user has no identity on the current chain
+// ----------------------------------------------------------------
+
+function NoIdentityOnChain({ chain, onCreate }) {
+  const [creating, setCreating] = useState(false);
+
+  const handleClick = async () => {
+    setCreating(true);
+    try {
+      await onCreate?.();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div>
+      {/* Hero card — same visual language as the main credit card, but inverted */}
+      <div
+        className="card"
+        style={{
+          background: "linear-gradient(135deg, #0b0b0b 0%, #1a1a1a 100%)",
+          color: "white",
+          padding: 24,
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        {/* Chain badge */}
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 10px",
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.14)",
+            borderRadius: 999,
+            fontSize: 11,
+            color: "#d4d4d8",
+            marginBottom: 20,
+          }}
+        >
+          <span
+            style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "#f97316",
+            }}
+          />
+          {chain.name}
+        </div>
+
+        <h2
+          style={{
+            fontSize: 22,
+            fontWeight: 700,
+            margin: "0 0 8px",
+            color: "white",
+            lineHeight: 1.25,
+          }}
+        >
+          Create your CreditGraph identity on {chain.name}
+        </h2>
+        <p
+          style={{
+            fontSize: 13,
+            color: "#9ca3af",
+            lineHeight: 1.5,
+            margin: "0 0 20px",
+          }}
+        >
+          Your score, loans, and vouches are per-chain. Mint a soulbound
+          identity here to borrow, vouch, and build credit on {chain.name}.
+        </p>
+
+        <button
+          onClick={handleClick}
+          disabled={creating}
+          className="btn-primary"
+          style={{
+            width: "100%",
+            padding: "14px 16px",
+            fontSize: 15,
+            fontWeight: 600,
+            opacity: creating ? 0.6 : 1,
+            cursor: creating ? "wait" : "pointer",
+          }}
+        >
+          {creating ? "Setting up identity…" : `Create identity on ${chain.name}`}
+        </button>
+      </div>
+
+      {/* What this means — small explainer */}
+      <div style={{ marginTop: 24 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 10px" }}>
+          What happens next
+        </h3>
+        <ol
+          style={{
+            fontSize: 13,
+            color: "var(--text-muted)",
+            paddingLeft: 20,
+            lineHeight: 1.7,
+            margin: 0,
+          }}
+        >
+          <li>Mint a non-transferable ERC-5192 identity NFT on {chain.name}.</li>
+          <li>Three underwriter agents compute your initial score and sign a quorum.</li>
+          <li>You can immediately borrow, supply to the pool, and get vouched for.</li>
+        </ol>
+      </div>
+
+      {/* Why per-chain — soft explainer so it doesn't feel broken */}
+      <div
+        style={{
+          marginTop: 24,
+          padding: 14,
+          background: "#f9fafb",
+          border: "1px solid #f3f4f6",
+          borderRadius: 10,
+          fontSize: 12,
+          color: "var(--text-muted)",
+          lineHeight: 1.6,
+        }}
+      >
+        <strong style={{ color: "var(--text-main)" }}>Why a separate identity?</strong>{" "}
+        Each chain holds its own copy of the protocol — pool, agents, oracle. Your
+        identity on one chain can later port its reputation to another via the
+        cross-chain attestation bridge.
       </div>
     </div>
   );

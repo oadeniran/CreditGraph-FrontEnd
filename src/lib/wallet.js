@@ -1,49 +1,70 @@
 /**
- * Wallet service. UI imports this; it dispatches to the active chain's adapter.
- * Adding SUI = swap which adapter handles it; this file doesn't change.
+ * Wallet service. UI imports this; it dispatches to the ACTIVE chain's adapter.
+ *
+ * Chain-aware: every call reads `getActiveChain()` at invocation time, so when
+ * ChainProvider switches chains, the next wallet call targets the new chain
+ * without any component change.
+ *
+ * Adding SUI = add a sui-adapter, hydrate it into the registry; this file
+ * doesn't change.
  */
 
-import { getDefaultChain, CHAIN_KIND } from "./chains";
+import { getActiveChain, CHAIN_KIND } from "./chains";
 
-const CHAIN = getDefaultChain();
-const ADAPTER = CHAIN.adapter;
+export { getActiveChain as activeChain }; // compatibility shim for legacy imports
 
-export { CHAIN as activeChain };
+function _chain() {
+  return getActiveChain();
+}
+
+function _adapter() {
+  return _chain().adapter;
+}
 
 export const wallet = {
   isInstalled() {
-    return ADAPTER.isWalletInstalled();
+    try {
+      return _adapter().isWalletInstalled();
+    } catch {
+      // Registry not hydrated yet
+      return typeof window !== "undefined" && Boolean(window.ethereum);
+    }
   },
 
   async connect() {
-    return await ADAPTER.connect();
+    return await _adapter().connect();
   },
 
   async currentAddress() {
-    return await ADAPTER.getConnectedAddress();
+    try {
+      return await _adapter().getConnectedAddress();
+    } catch {
+      return null;
+    }
   },
 
   async isOnCorrectNetwork() {
-    return await ADAPTER.isOnExpectedNetwork(CHAIN);
+    return await _adapter().isOnExpectedNetwork(_chain());
   },
 
   async switchToCorrectNetwork() {
-    await ADAPTER.switchNetwork(CHAIN);
+    await _adapter().switchNetwork(_chain());
   },
 
   async getNativeBalance(address) {
-    return await ADAPTER.getNativeBalance(CHAIN, address);
+    return await _adapter().getNativeBalance(_chain(), address);
   },
 
   async getUsdcBalance(address) {
-    return await ADAPTER.getTokenBalance(CHAIN, CHAIN.contracts.USDC, address, 6);
+    const chain = _chain();
+    return await _adapter().getTokenBalance(chain, chain.contracts.USDC, address, 6);
   },
 
   onAccountChange(callback) {
-    return ADAPTER.onAccountChange(callback);
+    return _adapter().onAccountChange(callback);
   },
 
   onChainChange(callback) {
-    return ADAPTER.onChainChange(callback);
+    return _adapter().onChainChange(callback);
   },
 };

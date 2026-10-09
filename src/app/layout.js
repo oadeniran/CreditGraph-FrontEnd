@@ -1,6 +1,7 @@
 import Script from "next/script";
 import "./globals.css";
 import { ToastProvider } from "@/lib/toast";
+import { ChainProvider } from "@/lib/chainContext";
 import NetworkGuard from "@/components/NetworkGuard";
 
 export const metadata = {
@@ -17,8 +18,10 @@ export default function RootLayout({ children }) {
       </head>
       <body>
         <ToastProvider>
-          <NetworkGuard />
-          {children}
+          <ChainProvider>
+            <NetworkGuard />
+            {children}
+          </ChainProvider>
         </ToastProvider>
       </body>
     </html>

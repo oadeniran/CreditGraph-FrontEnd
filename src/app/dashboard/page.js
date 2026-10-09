@@ -13,12 +13,15 @@ import TxModal from "@/components/TxModal";
 import BorrowModal from "@/components/modals/BorrowModal";
 import RepayModal from "@/components/modals/RepayModal";
 import VouchModal from "@/components/modals/VouchModal";
+import ChainSwitcher from "@/components/ChainSwitcher";
 import { SkeletonDashboard } from "@/components/Skeleton";
 import { shortAddress } from "@/lib/format";
+import { useChain } from "@/lib/chainContext";
 import AttestationsTab from "./tabs/AttestationsTab";
 
 export default function Dashboard() {
   const dash = useDashboard();
+  const { activeChainKey } = useChain();
   const {
     walletAddress, user, loading, error, refetch,
     activeTab, setActiveTab,
@@ -39,6 +42,9 @@ export default function Dashboard() {
       <main className="container main-content">
         <div className={`flex-row ${styles.header}`}>
           <h2>Credit<span className="text-orange">Graph</span></h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ChainSwitcher />
+          </div>
         </div>
         <SkeletonDashboard />
       </main>
@@ -48,6 +54,10 @@ export default function Dashboard() {
   if (error && !user) {
     return (
       <main className="container">
+        <div className={`flex-row ${styles.header}`}>
+          <h2>Credit<span className="text-orange">Graph</span></h2>
+          <ChainSwitcher />
+        </div>
         <h2>Couldn't load your dashboard</h2>
         <p style={{ color: "var(--text-muted)" }}>{error.message}</p>
         <button className="btn-primary" onClick={() => (window.location.href = "/")}>
@@ -65,7 +75,10 @@ export default function Dashboard() {
       <main className="container main-content">
         <div className={`flex-row ${styles.header}`}>
           <h2>Credit<span className="text-orange">Graph</span></h2>
-          <span className={styles.walletBadge}>{shortAddress(walletAddress)}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ChainSwitcher />
+            <span className={styles.walletBadge}>{shortAddress(walletAddress)}</span>
+          </div>
         </div>
 
         {activeTab === "dashboard" && (
@@ -91,7 +104,7 @@ export default function Dashboard() {
           />
         )}
 
-        {activeTab === "market" && <MarketTab chainKey="arbitrumSepolia" />}
+        {activeTab === "market" && <MarketTab chainKey={activeChainKey} />}
 
         {activeTab === "attestations" && (
           <AttestationsTab
@@ -188,7 +201,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        <TxModal state={tx.state} chainKey="arbitrumSepolia" onClose={closeTxModal} />
+        <TxModal state={tx.state} chainKey={activeChainKey} onClose={closeTxModal} />
       </main>
 
       <nav className="bottom-nav">

@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { wallet, activeChain } from "@/lib/wallet";
+import { wallet } from "@/lib/wallet";
+import { useChain } from "@/lib/chainContext";
 import { toast } from "@/lib/toast";
 
 /**
  * Shows a sticky banner at the top of the screen if the user's wallet is on
- * the wrong network. Offers a one-click switch.
+ * the wrong network for the ACTIVE chain. Offers a one-click switch.
+ *
+ * Reactive: when the user picks a different chain in the UI (via chain
+ * switcher), this re-checks against the new chain.
  */
 export default function NetworkGuard() {
+  const { activeChain, activeChainKey } = useChain();
   const [wrongNetwork, setWrongNetwork] = useState(false);
 
   useEffect(() => {
@@ -16,6 +21,7 @@ export default function NetworkGuard() {
 
     async function check() {
       if (!wallet.isInstalled()) {
+        if (!cancelled) setWrongNetwork(false);
         return;
       }
       const address = await wallet.currentAddress();
@@ -37,7 +43,7 @@ export default function NetworkGuard() {
       unsubChain && unsubChain();
       unsubAcct && unsubAcct();
     };
-  }, []);
+  }, [activeChainKey]); // ← re-check whenever the UI's active chain changes
 
   if (!wrongNetwork) return null;
 
