@@ -151,8 +151,9 @@ export default function ChainSwitcher() {
 // Falls back to orange for unknown chains.
 function _chainColor(key) {
   const map = {
-    arbitrum_sepolia: "#28A0F0",     // Arbitrum blue
-    monad_testnet: "#9b5df0",         // Monad purple
+    arbitrum_sepolia: "#28A0F0",
+    monad_testnet: "#9b5df0",
+    elysium_testnet: "#06b6d4",
     optimism_sepolia: "#FF0420",
     base_sepolia: "#0052FF",
   };
